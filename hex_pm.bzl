@@ -1,4 +1,4 @@
-load(":bazel_erlang_lib.bzl", "DEFAULT_ERLC_OPTS")
+load(":bazel_erlang_defs.bzl", "DEFAULT_ERLC_OPTS")
 load(":hex_archive.bzl", "hex_archive")
 
 def hex_pm_bazel_erlang_lib(

@@ -4,11 +4,10 @@ load(
     "ErlangVersionProvider",
 )
 load(
-    ":bazel_erlang_lib.bzl",
+    ":bazel_erlang_defs.bzl",
     "BEGINS_WITH_FUN",
     "ErlangLibInfo",
     "QUERY_ERL_VERSION",
-    "path_join",
 )
 load(":ct.bzl", "code_paths")
 

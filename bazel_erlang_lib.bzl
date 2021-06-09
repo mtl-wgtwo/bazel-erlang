@@ -1,64 +1,20 @@
-load(":erlang_home.bzl", "ErlangHomeProvider", "ErlangVersionProvider")
-
-ErlangLibInfo = provider(
-    doc = "Compiled Erlang sources",
-    fields = {
-        "lib_name": "Name of the erlang lib",
-        "erlang_version": "The erlang version used to produce the beam files",
-        "include": "Public header files",
-        "beam": "Compiled bytecode",
-        "priv": "Additional files",
-        "deps": "Runtime dependencies of the compiled sources",
-    },
+load(":erlang_home.bzl", "ErlangVersionProvider")
+load(
+    ":bazel_erlang_defs.bzl",
+    "DEFAULT_ERLC_OPTS",
+    "DEFAULT_TEST_ERLC_OPTS",
+    "ErlangLibInfo",
+    "flat_deps",
+    "path_join",
 )
-
-BEGINS_WITH_FUN = """beginswith() { case $2 in "$1"*) true;; *) false;; esac; }"""
-QUERY_ERL_VERSION = """erl -eval '{ok, Version} = file:read_file(filename:join([code:root_dir(), "releases", erlang:system_info(otp_release), "OTP_VERSION"])), io:fwrite(Version), halt().' -noshell"""
-
-DEFAULT_ERLC_OPTS = [
-    "-Werror",
-    "+debug_info",
-    "+warn_export_vars",
-    "+warn_shadow_vars",
-    "+warn_obsolete_guard",
-]
-
-DEFAULT_TEST_ERLC_OPTS = [
-    "+debug_info",
-    "+warn_export_vars",
-    "+warn_shadow_vars",
-    "+warn_obsolete_guard",
-    "-DTEST=1",
-]
-
-# NOTE: we should probably fetch the separator with ctx.host_configuration.host_path_separator
-def path_join(*components):
-    return "/".join(components)
-
-def _contains_by_lib_name(dep, deps):
-    for d in deps:
-        if d[ErlangLibInfo].lib_name == dep[ErlangLibInfo].lib_name:
-            # TODO: fail if name matches but they are not identical
-            return True
-    return False
-
-def flat_deps(list_of_labels_providing_erlang_lib_info):
-    deps = []
-    for dep in list_of_labels_providing_erlang_lib_info:
-        if not _contains_by_lib_name(dep, deps):
-            deps.append(dep)
-            for t in dep[ErlangLibInfo].deps:
-                if not _contains_by_lib_name(t, deps):
-                    deps.append(t)
-    return deps
-
-def unique_dirnames(files):
-    dirs = []
-    for f in files:
-        dirname = f.path if f.is_directory else f.dirname
-        if dirname not in dirs:
-            dirs.append(dirname)
-    return dirs
+load(
+    ":bazel_erlc.bzl",
+    "erlc",
+)
+load(
+    ":bazel_asn1.bzl",
+    "asn1",
+)
 
 def _module_name(f):
     return "'{}'".format(f.basename.replace(".beam", "", 1))
@@ -151,109 +107,12 @@ app_file = rule(
     },
 )
 
-def beam_file(ctx, src, dir):
-    name = src.basename.replace(".erl", ".beam")
-    return ctx.actions.declare_file(path_join(dir, name))
-
-def _erlc_impl(ctx):
-    erlang_version = ctx.attr._erlang_version[ErlangVersionProvider].version
-
-    beam_files = [beam_file(ctx, src, ctx.attr.dest) for src in ctx.files.srcs]
-
-    dest_dir = beam_files[0].dirname
-
-    erl_args = ctx.actions.args()
-    erl_args.add("-v")
-
-    for dir in unique_dirnames(ctx.files.hdrs):
-        erl_args.add("-I", dir)
-
-    for dep in ctx.attr.deps:
-        lib_info = dep[ErlangLibInfo]
-        if lib_info.erlang_version != erlang_version:
-            fail("Mismatched erlang versions", erlang_version, lib_info.erlang_version)
-        for dir in unique_dirnames(lib_info.include):
-            erl_args.add("-I", path_join(dir, "../.."))
-        for dir in unique_dirnames(lib_info.beam):
-            erl_args.add("-pa", dir)
-
-    for dir in unique_dirnames(ctx.files.beam):
-        erl_args.add("-pa", dir)
-
-    erl_args.add("-o", dest_dir)
-
-    erl_args.add_all(ctx.attr.erlc_opts)
-
-    erl_args.add_all(ctx.files.srcs)
-
-    script = """
-        set -euo pipefail
-
-        mkdir -p {dest_dir}
-        export HOME=$PWD
-
-        {begins_with_fun}
-        V=$({erlang_home}/bin/{query_erlang_version})
-        if ! beginswith "{erlang_version}" "$V"; then
-            echo "Erlang version mismatch (Expected {erlang_version}, found $V)"
-            exit 1
-        fi
-
-        {erlang_home}/bin/erlc $@
-    """.format(
-        dest_dir = dest_dir,
-        begins_with_fun = BEGINS_WITH_FUN,
-        query_erlang_version = QUERY_ERL_VERSION,
-        erlang_version = erlang_version,
-        erlang_home = ctx.attr._erlang_home[ErlangHomeProvider].path,
-    )
-
-    inputs = []
-    inputs.extend(ctx.files.hdrs)
-    inputs.extend(ctx.files.srcs)
-    for dep in ctx.attr.deps:
-        lib_info = dep[ErlangLibInfo]
-        inputs.extend(lib_info.include)
-        inputs.extend(lib_info.beam)
-    inputs.extend(ctx.files.beam)
-
-    ctx.actions.run_shell(
-        inputs = inputs,
-        outputs = beam_files,
-        command = script,
-        arguments = [erl_args],
-        mnemonic = "ERLC",
-    )
-
-    return [
-        DefaultInfo(files = depset(beam_files)),
-    ]
-
-erlc = rule(
-    implementation = _erlc_impl,
-    attrs = {
-        "_erlang_home": attr.label(default = ":erlang_home"),
-        "_erlang_version": attr.label(default = ":erlang_version"),
-        "hdrs": attr.label_list(allow_files = [".hrl"]),
-        "srcs": attr.label_list(
-            mandatory = True,
-            allow_files = [".erl"],
-        ),
-        "beam": attr.label_list(allow_files = [".beam"]),
-        "deps": attr.label_list(providers = [ErlangLibInfo]),
-        "erlc_opts": attr.string_list(),
-        "dest": attr.string(
-            default = "ebin",
-        ),
-    },
-)
-
 def _impl(ctx):
     compiled_files = ctx.files.app + ctx.files.beam
 
     deps = flat_deps(ctx.attr.deps)
 
-    runfiles = ctx.runfiles(compiled_files + ctx.files.priv)
+    runfiles = ctx.runfiles(compiled_files + ctx.files.priv + ctx.files.hdrs)
     for dep in ctx.attr.deps:
         runfiles = runfiles.merge(dep[DefaultInfo].default_runfiles)
 
@@ -267,7 +126,7 @@ def _impl(ctx):
             deps = deps,
         ),
         DefaultInfo(
-            files = depset(compiled_files),
+            files = depset(compiled_files + ctx.files.hdrs),
             runfiles = runfiles,
         ),
     ]
@@ -301,8 +160,19 @@ def erlang_lib(
         runtime_deps = []):
     all_beam = []
 
+    asn1_files = native.glob(["asn1/**/*.asn1"])
+    asn1_deps = []
+    if len(asn1_files) > 0:
+        asn1_deps = [":asn1_precompile"]
+        asn1(
+            name = "asn1_precompile",
+            hdrs = [],
+            srcs = asn1_files,
+            erlc_opts = _unique(erlc_opts),
+        )
+
     if len(first_srcs) > 0:
-        all_beam = [":first_beam_files"]
+        all_beam = all_beam + [":first_beam_files"]
         erlc(
             name = "first_beam_files",
             hdrs = native.glob(["include/**/*.hrl", "src/**/*.hrl"]),
@@ -320,6 +190,7 @@ def erlang_lib(
         erlc_opts = _unique(erlc_opts),
         dest = "ebin",
         deps = build_deps + deps,
+        precompile_deps = asn1_deps,
     )
 
     all_beam = all_beam + [":beam_files"]
@@ -376,8 +247,21 @@ def test_erlang_lib(
         runtime_deps = []):
     all_beam = []
 
+    asn1_files = native.glob(["asn1/**/*.asn1"])
+    asn1_deps = []
+    if len(asn1_files) > 0:
+        asn1_deps = [":asn1_test_precompile"]
+        asn1(
+            name = "asn1_test_precompile",
+            hdrs = [],
+            srcs = asn1_files,
+            erlc_opts = _unique(erlc_opts),
+            dest = "test",
+            testonly = True,
+        )
+
     if len(first_srcs) > 0:
-        all_beam = [":first_test_beam_files"]
+        all_beam = all_beam + [":first_test_beam_files"]
         erlc(
             name = "first_test_beam_files",
             hdrs = native.glob(["include/**/*.hrl", "src/**/*.hrl"]),
@@ -396,6 +280,7 @@ def test_erlang_lib(
         erlc_opts = _unique(erlc_opts),
         dest = "test",
         deps = build_deps + deps,
+        precompile_deps = asn1_deps,
         testonly = True,
     )
 

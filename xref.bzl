@@ -4,7 +4,7 @@ load(
     "ErlangVersionProvider",
 )
 load(
-    ":bazel_erlang_lib.bzl",
+    ":bazel_erlang_defs.bzl",
     "BEGINS_WITH_FUN",
     "ErlangLibInfo",
     "QUERY_ERL_VERSION",
@@ -36,6 +36,7 @@ def _impl(ctx):
             extra_paths.extend(code_paths(dep))
         else:
             dirs.append(path_join(dep.label.package, "ebin"))
+            extra_paths.extend(code_paths(dep))
 
     xref_config = "[{xref, ["
     xref_config = xref_config + "{config, #{"

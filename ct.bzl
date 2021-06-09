@@ -1,14 +1,16 @@
 load(":erlang_home.bzl", "ErlangHomeProvider", "ErlangVersionProvider")
 load(
-    ":bazel_erlang_lib.bzl",
+    ":bazel_erlang_defs.bzl",
     "BEGINS_WITH_FUN",
     "DEFAULT_TEST_ERLC_OPTS",
     "ErlangLibInfo",
     "QUERY_ERL_VERSION",
-    "beam_file",
-    "erlc",
     "flat_deps",
     "path_join",
+)
+load(
+    ":bazel_erlc.bzl",
+    "erlc",
 )
 
 def sanitize_sname(s):

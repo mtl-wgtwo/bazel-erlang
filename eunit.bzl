@@ -1,12 +1,15 @@
 load(":erlang_home.bzl", "ErlangHomeProvider", "ErlangVersionProvider")
 load(
-    ":bazel_erlang_lib.bzl",
+    ":bazel_erlang_defs.bzl",
     "BEGINS_WITH_FUN",
     "DEFAULT_TEST_ERLC_OPTS",
     "ErlangLibInfo",
     "QUERY_ERL_VERSION",
-    "erlc",
     "flat_deps",
+)
+load(
+    ":bazel_erlc.bzl",
+    "erlc",
 )
 load(":ct.bzl", "code_paths")
 
